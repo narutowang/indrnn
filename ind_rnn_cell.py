@@ -203,9 +203,9 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
     """
     gate_inputs = math_ops.matmul(inputs, self._input_kernel)
     is_training = True
-    gate_inputs = batch_normal(gate_inputs, 'gate_inputs', is_training)
+    gate_inputs = batch_norm(gate_inputs, 'gate_inputs', is_training)
     recurrent_update = math_ops.multiply(state, self._recurrent_kernel)
-    recurrent_update = batch_normal(recurrent_update, 'recurrent_update', is_training)
+    recurrent_update = batch_norm(recurrent_update, 'recurrent_update', is_training)
     #if last_state:
     #    hierarchy_update = math_ops.multiply(last_state, self._hierarchy_kernel)
     #    gate_inputs = math_ops.add(gate_inputs, hierarchy_update)
