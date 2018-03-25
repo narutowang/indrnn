@@ -12,6 +12,38 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import array_ops
 
+def batch_norm(inputs, name_scope, is_training, epsilon=1e-3, decay=0.99):
+    with tf.variable_scope(name_scope):
+        size = inputs.get_shape().as_list()[1]
+
+        scale = tf.get_variable(
+            'scale', [size], initializer=tf.constant_initializer(0.1))
+        offset = tf.get_variable('offset', [size])
+
+        population_mean = tf.get_variable(
+            'population_mean', [size],
+            initializer=tf.zeros_initializer(), trainable=False)
+        population_var = tf.get_variable(
+            'population_var', [size],
+            initializer=tf.ones_initializer(), trainable=False)
+        batch_mean, batch_var = tf.nn.moments(inputs, [0])
+
+        # The following part is based on the implementation of :
+        # https://github.com/cooijmanstim/recurrent-batch-normalization
+        train_mean_op = tf.assign(
+            population_mean,
+            population_mean * decay + batch_mean * (1 - decay))
+        train_var_op = tf.assign(
+            population_var, population_var * decay + batch_var * (1 - decay))
+
+        if is_training is True:
+            with tf.control_dependencies([train_mean_op, train_var_op]):
+                return tf.nn.batch_normalization(
+                    inputs, batch_mean, batch_var, offset, scale, epsilon)
+        else:
+            return tf.nn.batch_normalization(
+                inputs, population_mean, population_var, offset, scale,
+                epsilon)
 
 class IndRNNCell(rnn_cell_impl._LayerRNNCell):
   """Independently RNN Cell. Adapted from `rnn_cell_impl.BasicRNNCell`.
@@ -170,7 +202,10 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
         2-dimensional tensor of shape `[batch, num_units]`.
     """
     gate_inputs = math_ops.matmul(inputs, self._input_kernel)
+    is_training = True
+    gate_inputs = batch_normal(gate_inputs, 'gate_inputs', is_training)
     recurrent_update = math_ops.multiply(state, self._recurrent_kernel)
+    recurrent_update = batch_normal(recurrent_update, 'recurrent_update', is_training)
     #if last_state:
     #    hierarchy_update = math_ops.multiply(last_state, self._hierarchy_kernel)
     #    gate_inputs = math_ops.add(gate_inputs, hierarchy_update)
