@@ -6,6 +6,11 @@ from tensorflow.python.ops import nn_ops
 from tensorflow.python.ops import clip_ops
 from tensorflow.python.ops import rnn_cell_impl
 from tensorflow.python.layers import base as base_layer
+import tensorflow as tf
+from tensorflow.python.util import nest
+from tensorflow.python.framework import ops
+from tensorflow.python.ops import variable_scope as vs
+from tensorflow.python.ops import array_ops
 
 
 class IndRNNCell(rnn_cell_impl._LayerRNNCell):
@@ -49,7 +54,9 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
                recurrent_initializer=None,
                activation=None,
                reuse=None,
-               name=None):
+               name=None,
+               batch_norm=False,
+               in_training=False):
     super(IndRNNCell, self).__init__(_reuse=reuse, name=name)
 
     # Inputs must be 2-dimensional.
@@ -60,6 +67,9 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
     self._recurrent_max_abs = recurrent_max_abs
     self._recurrent_initializer = recurrent_initializer
     self._activation = activation or nn_ops.relu
+
+    self._batch_norm = batch_norm
+    self._in_training = in_training
 
   @property
   def state_size(self):
@@ -78,6 +88,10 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
     self._input_kernel = self.add_variable(
         "input_kernel",
         shape=[input_depth, self._num_units])
+
+    self._hierarchy_kernel1 = self.add_variable(
+        "hierarchy_kernel1",
+        shape=[self._num_units, self._num_units])
 
     if self._recurrent_initializer is None:
       # Initialize the recurrent weights uniformly in [-max_abs, max_abs] or
@@ -110,14 +124,34 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
                                                       -self._recurrent_max_abs,
                                                       self._recurrent_max_abs)
 
+    self._hierarchy_kernel = self.add_variable(
+        "hierarchy_kernel",
+        shape=[self._num_units], initializer=self._recurrent_initializer)
+
+    if self._recurrent_min_abs:
+      abs_kernel = math_ops.abs(self._hierarchy_kernel)
+      min_abs_kernel = math_ops.maximum(abs_kernel, self._recurrent_min_abs)
+      self._hierarchy_kernel = math_ops.multiply(
+          math_ops.sign(self._hierarchy_kernel),
+          min_abs_kernel
+      )
+
+    if self._recurrent_max_abs:
+      self._hierarchy_kernel = clip_ops.clip_by_value(self._hierarchy_kernel,
+                                                      -self._recurrent_max_abs,
+                                                      self._recurrent_max_abs)
+
     self._bias = self.add_variable(
         "bias",
         shape=[self._num_units],
         initializer=init_ops.zeros_initializer(dtype=self.dtype))
 
+    if self._batch_norm:
+        self.bn = tf.keras.layers.BatchNormalization(momentum=0.9)
+
     self.built = True
 
-  def call(self, inputs, state):
+  def call(self, inputs, state, last_state=None):
     """Run one step of the IndRNN.
 
     Calculates the output and new hidden state using the IndRNN equation
@@ -137,7 +171,97 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
     """
     gate_inputs = math_ops.matmul(inputs, self._input_kernel)
     recurrent_update = math_ops.multiply(state, self._recurrent_kernel)
+    #if last_state:
+    #    hierarchy_update = math_ops.multiply(last_state, self._hierarchy_kernel)
+    #    gate_inputs = math_ops.add(gate_inputs, hierarchy_update)
+
+        #gate_inputs = math_ops.add(gate_inputs, last_state)
+
+        #hierarchy_update = math_ops.matmul(last_state, self._hierarchy_kernel1)
+        #gate_inputs = math_ops.add(gate_inputs, hierarchy_update)
+    #recurrent_update = math_ops.add(recurrent_update, tf.tile(math_ops.reduce_mean(recurrent_update, 1, keep_dims=True), [1,128]))
     gate_inputs = math_ops.add(gate_inputs, recurrent_update)
     gate_inputs = nn_ops.bias_add(gate_inputs, self._bias)
     output = self._activation(gate_inputs)
+    if self._batch_norm:
+        output = self.bn(output, training=self._in_training)
     return output, output
+
+
+class MultiRNNCell(rnn_cell_impl._LayerRNNCell):
+  """RNN cell composed sequentially of multiple simple cells."""
+
+  def __init__(self, cells, state_is_tuple=True):
+    """Create a RNN cell composed sequentially of a number of RNNCells.
+    Args:
+      cells: list of RNNCells that will be composed in this order.
+      state_is_tuple: If True, accepted and returned states are n-tuples, where
+        `n = len(cells)`.  If False, the states are all
+        concatenated along the column axis.  This latter behavior will soon be
+        deprecated.
+    Raises:
+      ValueError: if cells is empty (not allowed), or at least one of the cells
+        returns a state tuple but the flag `state_is_tuple` is `False`.
+    """
+    super(MultiRNNCell, self).__init__()
+    if not cells:
+      raise ValueError("Must specify at least one cell for MultiRNNCell.")
+    if not nest.is_sequence(cells):
+      raise TypeError(
+          "cells must be a list or tuple, but saw: %s." % cells)
+
+    self._cells = cells
+    self._state_is_tuple = state_is_tuple
+    if not state_is_tuple:
+      if any(nest.is_sequence(c.state_size) for c in self._cells):
+        raise ValueError("Some cells return tuples of states, but the flag "
+                         "state_is_tuple is not set.  State sizes are: %s"
+                         % str([c.state_size for c in self._cells]))
+
+    self.last_states = [None for _ in range(len(cells)+1)]
+
+  @property
+  def state_size(self):
+    if self._state_is_tuple:
+      return tuple(cell.state_size for cell in self._cells)
+    else:
+      return sum([cell.state_size for cell in self._cells])
+
+  @property
+  def output_size(self):
+    return self._cells[-1].output_size
+
+  def zero_state(self, batch_size, dtype):
+    with ops.name_scope(type(self).__name__ + "ZeroState", values=[batch_size]):
+      if self._state_is_tuple:
+        return tuple(cell.zero_state(batch_size, dtype) for cell in self._cells)
+      else:
+        # We know here that state_size of each cell is not a tuple and
+        # presumably does not contain TensorArrays or anything else fancy
+        return super(MultiRNNCell, self).zero_state(batch_size, dtype)
+
+  def call(self, inputs, state):
+    """Run this multi-layer cell on inputs, starting from state."""
+    cur_state_pos = 0
+    cur_inp = inputs
+    new_states = []
+    for i, cell in enumerate(self._cells):
+      with vs.variable_scope("cell_%d" % i):
+        if self._state_is_tuple:
+          if not nest.is_sequence(state):
+            raise ValueError(
+                "Expected state to be a tuple of length %d, but received: %s" %
+                (len(self.state_size), state))
+          cur_state = state[i]
+        else:
+          cur_state = array_ops.slice(state, [0, cur_state_pos],
+                                      [-1, cell.state_size])
+          cur_state_pos += cell.state_size
+        cur_inp, new_state = cell(cur_inp, cur_state, self.last_states[i+1])
+        new_states.append(new_state)
+        self.last_states[i] = new_state
+
+    new_states = (tuple(new_states) if self._state_is_tuple else
+                  array_ops.concat(new_states, 1))
+
+    return cur_inp, new_states
