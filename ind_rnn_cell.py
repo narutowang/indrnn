@@ -11,6 +11,7 @@ from tensorflow.python.util import nest
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import array_ops
+import numpy as np
 
 def batch_norm(inputs, name_scope, is_training, epsilon=1e-3, decay=0.99):
     with tf.variable_scope(name_scope):
@@ -89,7 +90,8 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
                reuse=None,
                name=None,
                batch_norm=False,
-               in_training=False):
+               in_training=False,
+               layer_idx=0):
     super(IndRNNCell, self).__init__(_reuse=reuse, name=name)
 
     # Inputs must be 2-dimensional.
@@ -98,13 +100,14 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
     self._num_units = num_units
     self._recurrent_min_abs = recurrent_min_abs
     self._recurrent_max_abs = recurrent_max_abs
-    self._recurrent_max_abs_tensor = tf.constant(np.ones((num_units, num_units)) * self._recurrent_max_abs)
+    self._recurrent_max_abs_tensor = tf.cast(tf.constant(np.ones((num_units, num_units)) * self._recurrent_max_abs), dtype=tf.float32)
     self._recurrent_initializer = recurrent_initializer
     self._input_initializer = input_initializer
     self._activation = activation or nn_ops.relu
 
     self._batch_norm = batch_norm
     self._in_training = in_training
+    self._layer_idx = layer_idx
     self.topdown = True
 
   @property
@@ -130,7 +133,7 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
         "hierarchy_kernel1",
         shape=[self._num_units, self._num_units])
 
-    if self.topdown:
+    if self.topdown and self._layer_idx > 1: #clip norm on layer > 1
         #self._input_kernel = clip_ops.clip_by_norm(self._input_kernel, self._recurrent_max_abs, axes=0)
         #self._hierarchy_kernel1 = clip_ops.clip_by_norm(self._hierarchy_kernel1, self._recurrent_max_abs, axes=1)
         W_l2norm = math_ops.sqrt(math_ops.matmul(self._hierarchy_kernel1, self._input_kernel))

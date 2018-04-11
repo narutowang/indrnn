@@ -46,7 +46,7 @@ def main():
       recurrent_init_lower = 0 if layer < NUM_LAYERS else LAST_LAYER_LOWER_BOUND
       recurrent_init = tf.random_uniform_initializer(recurrent_init_lower, RECURRENT_MAX)
       cells.append(IndRNNCell(NUM_UNITS, recurrent_max_abs=RECURRENT_MAX, batch_norm=False, 
-          in_training=in_training))
+          in_training=in_training, layer_idx=layer))
           #input_initializer=input_init,
           #recurrent_initializer=recurrent_init))
 
