@@ -83,6 +83,7 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
                num_units,
                recurrent_min_abs=0,
                recurrent_max_abs=None,
+               input_initializer=None,
                recurrent_initializer=None,
                activation=None,
                reuse=None,
@@ -97,11 +98,14 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
     self._num_units = num_units
     self._recurrent_min_abs = recurrent_min_abs
     self._recurrent_max_abs = recurrent_max_abs
+    self._recurrent_max_abs_tensor = tf.constant(np.ones((num_units, num_units)) * self._recurrent_max_abs)
     self._recurrent_initializer = recurrent_initializer
+    self._input_initializer = input_initializer
     self._activation = activation or nn_ops.relu
 
     self._batch_norm = batch_norm
     self._in_training = in_training
+    self.topdown = True
 
   @property
   def state_size(self):
@@ -120,10 +124,18 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
     self._input_kernel = self.add_variable(
         "input_kernel",
         shape=[input_depth, self._num_units])
+        #initializer=self._input_initializer)
 
     self._hierarchy_kernel1 = self.add_variable(
         "hierarchy_kernel1",
         shape=[self._num_units, self._num_units])
+
+    if self.topdown:
+        #self._input_kernel = clip_ops.clip_by_norm(self._input_kernel, self._recurrent_max_abs, axes=0)
+        #self._hierarchy_kernel1 = clip_ops.clip_by_norm(self._hierarchy_kernel1, self._recurrent_max_abs, axes=1)
+        W_l2norm = math_ops.sqrt(math_ops.matmul(self._hierarchy_kernel1, self._input_kernel))
+        self._input_kernel = self._input_kernel * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
+        self._hierarchy_kernel1 = self._hierarchy_kernel1 * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
 
     if self._recurrent_initializer is None:
       # Initialize the recurrent weights uniformly in [-max_abs, max_abs] or
@@ -203,23 +215,25 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
     """
     gate_inputs = math_ops.matmul(inputs, self._input_kernel)
     is_training = True
-    gate_inputs = batch_normal(gate_inputs, 'gate_inputs', is_training)
+    gate_inputs = batch_norm(gate_inputs, 'gate_inputs', is_training)
     recurrent_update = math_ops.multiply(state, self._recurrent_kernel)
-    recurrent_update = batch_normal(recurrent_update, 'recurrent_update', is_training)
-    #if last_state:
+    #recurrent_update = batch_norm(recurrent_update, 'recurrent_update', is_training)
+    if self.topdown and last_state:
     #    hierarchy_update = math_ops.multiply(last_state, self._hierarchy_kernel)
     #    gate_inputs = math_ops.add(gate_inputs, hierarchy_update)
 
         #gate_inputs = math_ops.add(gate_inputs, last_state)
 
-        #hierarchy_update = math_ops.matmul(last_state, self._hierarchy_kernel1)
-        #gate_inputs = math_ops.add(gate_inputs, hierarchy_update)
+        hierarchy_update = math_ops.matmul(last_state, self._hierarchy_kernel1)
+        hierarchy_update = batch_norm(hierarchy_update, 'hierarchy_update', is_training)
+        gate_inputs = math_ops.add(gate_inputs, hierarchy_update)
     #recurrent_update = math_ops.add(recurrent_update, tf.tile(math_ops.reduce_mean(recurrent_update, 1, keep_dims=True), [1,128]))
     gate_inputs = math_ops.add(gate_inputs, recurrent_update)
     gate_inputs = nn_ops.bias_add(gate_inputs, self._bias)
     output = self._activation(gate_inputs)
-    if self._batch_norm:
-        output = self.bn(output, training=self._in_training)
+    #output = batch_norm(output, 'output', is_training)
+    #if self._batch_norm:
+    #    output = self.bn(output, training=self._in_training)
     return output, output
 
 

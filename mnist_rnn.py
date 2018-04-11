@@ -19,6 +19,7 @@ LEARNING_RATE_INIT = 0.0002
 LEARNING_RATE_DECAY_STEPS = 600000
 NUM_LAYERS = 6
 RECURRENT_MAX = pow(2, 1 / TIME_STEPS)
+LAST_LAYER_LOWER_BOUND = pow(0.5, 1 / TIME_STEPS)
 
 # Parameters taken from https://arxiv.org/abs/1511.06464
 BATCH_SIZE = 50
@@ -26,7 +27,7 @@ OUTPUT_SIZE = 10
 NUM_EPOCHS = 10000
 
 from tensorflow.examples.tutorials.mnist import input_data
-mnist = input_data.read_data_sets("/tmp/MNIST", one_hot=False, validation_size=5000)
+mnist = input_data.read_data_sets("/tmp/MNIST", one_hot=False, validation_size=100)
 ITERATIONS_PER_EPOCH = int(mnist.train.num_examples / BATCH_SIZE)
 VAL_ITERS = int(mnist.validation.num_examples / BATCH_SIZE)
 TEST_ITERS = int(mnist.test.num_examples / BATCH_SIZE)
@@ -38,16 +39,25 @@ def main():
   inputs_ph1 = tf.expand_dims(inputs_ph, -1)
 
   in_training = tf.placeholder(tf.bool, shape=[])
+  input_init = tf.random_uniform_initializer(-0.001, 0.001)
+
+  cells = []
+  for layer in range(1, NUM_LAYERS+1):
+      recurrent_init_lower = 0 if layer < NUM_LAYERS else LAST_LAYER_LOWER_BOUND
+      recurrent_init = tf.random_uniform_initializer(recurrent_init_lower, RECURRENT_MAX)
+      cells.append(IndRNNCell(NUM_UNITS, recurrent_max_abs=RECURRENT_MAX, batch_norm=False, 
+          in_training=in_training))
+          #input_initializer=input_init,
+          #recurrent_initializer=recurrent_init))
 
   # Build the graph
   #cell = tf.nn.rnn_cell.MultiRNNCell([
-  cell = MultiRNNCell([
-    IndRNNCell(NUM_UNITS, recurrent_max_abs=RECURRENT_MAX, batch_norm=False, in_training=in_training) for _ in
-    range(NUM_LAYERS)
-  ])
+  cell = MultiRNNCell(cells)
   # cell = tf.nn.rnn_cell.BasicLSTMCell(NUM_UNITS) #uncomment this for LSTM runs
 
   output, state = tf.nn.dynamic_rnn(cell, inputs_ph1, dtype=tf.float32)
+  #is_training = True
+  #output = tf.layers.batch_normalization(output, training=is_training, momentum=0)
   last = output[:, -1, :]
 
   weight = tf.get_variable("softmax_weight", shape=[NUM_UNITS, OUTPUT_SIZE])
@@ -66,28 +76,37 @@ def main():
   optimize = optimizer.minimize(loss_op, global_step=global_step)
 
   # Train the model
-  fout = open('ind.txt', 'w')
-  with tf.Session() as sess:
+  np.random.seed(1234)
+  perm = np.random.permutation(TIME_STEPS)
+  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.2)
+  #fout = open('ind_semi_W_ckipnorm.txt', 'w')
+  #fout = open('ind_input_init.txt', 'w')
+  #fout = open('ind_bn.txt', 'w')
+  #fout = open('ind_bn_2init.txt', 'w')
+  #fout = open('ind_bn_after.txt', 'w')
+  #fout = open('ind_bn2.txt', 'w')
+  fout = open('ind_semi_W_clipcrossnorm_bn.txt', 'w')
+  with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options,log_device_placement=False)) as sess:
     sess.run(tf.global_variables_initializer())
     for epoch in range(NUM_EPOCHS):
         train_acc = []
         for iteration in range(ITERATIONS_PER_EPOCH):
             x, y = mnist.train.next_batch(BATCH_SIZE)
-            loss, _, acc= sess.run([loss_op, optimize, accuracy], {inputs_ph: x, targets_ph: y, in_training: False})
+            loss, _, acc= sess.run([loss_op, optimize, accuracy], {inputs_ph: x[:,perm], targets_ph: y, in_training: False})
             train_acc.append(acc)
-            #print (iteration, ITERATIONS_PER_EPOCH)
+            print (iteration, ITERATIONS_PER_EPOCH)
             sys.stdout.flush()
 
         valid_acc = []
         for iteration in range(VAL_ITERS):
             x, y = mnist.validation.next_batch(BATCH_SIZE)
-            loss, acc = sess.run([loss_op, accuracy], {inputs_ph: x, targets_ph: y, in_training: False})
+            loss, acc = sess.run([loss_op, accuracy], {inputs_ph: x[:,perm], targets_ph: y, in_training: False})
             valid_acc.append(acc)
 
         test_acc = []
         for iteration in range(TEST_ITERS):
             x, y = mnist.test.next_batch(256)
-            loss, acc = sess.run([loss_op, accuracy], {inputs_ph: x, targets_ph: y, in_training: False})
+            loss, acc = sess.run([loss_op, accuracy], {inputs_ph: x[:,perm], targets_ph: y, in_training: False})
             test_acc.append(acc)
 
         print ("epoch %d, train=%f, valid=%f, test=%f" % (epoch, np.mean(train_acc), np.mean(valid_acc), np.mean(test_acc)))
