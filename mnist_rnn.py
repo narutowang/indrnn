@@ -45,10 +45,10 @@ def main():
   for layer in range(1, NUM_LAYERS+1):
       recurrent_init_lower = 0 if layer < NUM_LAYERS else LAST_LAYER_LOWER_BOUND
       recurrent_init = tf.random_uniform_initializer(recurrent_init_lower, RECURRENT_MAX)
-      cells.append(IndRNNCell(NUM_UNITS, recurrent_max_abs=RECURRENT_MAX, batch_norm=False, 
-          in_training=in_training, layer_idx=layer))
-          #input_initializer=input_init,
-          #recurrent_initializer=recurrent_init))
+      single_cell = IndRNNCell(NUM_UNITS, recurrent_max_abs=RECURRENT_MAX, batch_norm=False, in_training=in_training, layer_idx=layer-1)
+      cells.append(single_cell)
+      #input_initializer=input_init,
+      #recurrent_initializer=recurrent_init))
 
   # Build the graph
   #cell = tf.nn.rnn_cell.MultiRNNCell([
@@ -56,6 +56,10 @@ def main():
   # cell = tf.nn.rnn_cell.BasicLSTMCell(NUM_UNITS) #uncomment this for LSTM runs
 
   output, state = tf.nn.dynamic_rnn(cell, inputs_ph1, dtype=tf.float32)
+
+  #print ( tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='cell_0'))
+  #print ( tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='rnn/multi_rnn_cell/cell_1' ))
+  #exit()
   #is_training = True
   #output = tf.layers.batch_normalization(output, training=is_training, momentum=0)
   last = output[:, -1, :]
@@ -84,7 +88,8 @@ def main():
   #fout = open('ind_bn.txt', 'w')
   #fout = open('ind_bn_2init.txt', 'w')
   #fout = open('ind_bn_after.txt', 'w')
-  #fout = open('ind_bn2.txt', 'w')
+  #fout = open('ind_bn3.txt', 'w')
+  #fout = open('ind_semi_W_clipl2norm_bn.txt', 'w')
   fout = open('ind_semi_W_clipcrossnorm_bn.txt', 'w')
   with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options,log_device_placement=False)) as sess:
     sess.run(tf.global_variables_initializer())

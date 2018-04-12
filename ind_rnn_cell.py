@@ -133,12 +133,16 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
         "hierarchy_kernel1",
         shape=[self._num_units, self._num_units])
 
-    if self.topdown and self._layer_idx > 1: #clip norm on layer > 1
-        #self._input_kernel = clip_ops.clip_by_norm(self._input_kernel, self._recurrent_max_abs, axes=0)
-        #self._hierarchy_kernel1 = clip_ops.clip_by_norm(self._hierarchy_kernel1, self._recurrent_max_abs, axes=1)
-        W_l2norm = math_ops.sqrt(math_ops.matmul(self._hierarchy_kernel1, self._input_kernel))
-        self._input_kernel = self._input_kernel * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
-        self._hierarchy_kernel1 = self._hierarchy_kernel1 * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
+    #if self.topdown:
+    #    self._hierarchy_kernel1 = clip_ops.clip_by_norm(self._hierarchy_kernel1, self._recurrent_max_abs, axes=1)
+    #    if self._layer_idx > 1:
+    #        self._input_kernel = clip_ops.clip_by_norm(self._input_kernel, self._recurrent_max_abs, axes=0)
+    #        '''
+    #        _input_kernel_top = None
+    #        W_l2norm = math_ops.sqrt(math_ops.matmul(self._hierarchy_kernel1, _input_kernel_top))
+    #        _input_kernel_top = _input_kernel_top * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
+    #        self._hierarchy_kernel1 = self._hierarchy_kernel1 * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
+    #        '''
 
     if self._recurrent_initializer is None:
       # Initialize the recurrent weights uniformly in [-max_abs, max_abs] or
@@ -216,6 +220,12 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
       A tuple containing the output and new hidden state. Both are the same
         2-dimensional tensor of shape `[batch, num_units]`.
     """
+    if self.topdown and last_state: #the final layer does not need to clip
+        #_input_kernel_top = [v for v in tf.global_variables() if v.name == "rnn/multi_rnn_cell/cell_"+str(self._layer_idx+1)+"/ind_rnn_cell/input_kernel:0"][0]
+        _input_kernel_top = tf.get_variable("rnn/multi_rnn_cell/cell_"+str(self._layer_idx+1)+"/ind_rnn_cell/input_kernel:0", reuse=True)
+        W_l2norm = math_ops.sqrt(math_ops.matmul(self._hierarchy_kernel1, _input_kernel_top))
+        _input_kernel_top = _input_kernel_top * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
+        self._hierarchy_kernel1 = self._hierarchy_kernel1 * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
     gate_inputs = math_ops.matmul(inputs, self._input_kernel)
     is_training = True
     gate_inputs = batch_norm(gate_inputs, 'gate_inputs', is_training)
