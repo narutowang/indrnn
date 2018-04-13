@@ -129,6 +129,11 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
         shape=[input_depth, self._num_units])
         #initializer=self._input_initializer)
 
+    self._input_kernel_top = self.add_variable(
+        "input_kernel_top",
+        shape=[self._num_units, self._num_units])
+        #initializer=self._input_initializer)
+
     self._hierarchy_kernel1 = self.add_variable(
         "hierarchy_kernel1",
         shape=[self._num_units, self._num_units])
@@ -202,7 +207,7 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
 
     self.built = True
 
-  def call(self, inputs, state, last_state=None):
+  def call(self, inputs, state):
     """Run one step of the IndRNN.
 
     Calculates the output and new hidden state using the IndRNN equation
@@ -220,20 +225,26 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
       A tuple containing the output and new hidden state. Both are the same
         2-dimensional tensor of shape `[batch, num_units]`.
     """
-    if self.topdown and last_state: #the final layer does not need to clip
-        #_input_kernel_top = [v for v in tf.global_variables() if v.name == "rnn/multi_rnn_cell/cell_"+str(self._layer_idx+1)+"/ind_rnn_cell/input_kernel:0"][0]
-        _input_kernel_top = tf.get_variable("rnn/multi_rnn_cell/cell_"+str(self._layer_idx+1)+"/ind_rnn_cell/input_kernel:0", reuse=True)
-        W_l2norm = math_ops.sqrt(math_ops.matmul(self._hierarchy_kernel1, _input_kernel_top))
-        _input_kernel_top = _input_kernel_top * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
+    last_state = state[1]
+    if self.topdown and self._layer_idx < 5: #the final layer does not need to clip
+        print ("hah")
+        #self._input_kernel_top = [v for v in tf.global_variables() if v.name == "rnn/multi_rnn_cell/cell_"+str(self._layer_idx+1)+"/ind_rnn_cell/input_kernel:0"][0]
+        #self._input_kernel_top = tf.get_variable("rnn/multi_rnn_cell/cell_"+str(self._layer_idx+1)+"/ind_rnn_cell/input_kernel:0")
+        W_l2norm = math_ops.sqrt(math_ops.matmul(self._hierarchy_kernel1, self._input_kernel_top))
+        self._input_kernel_top = self._input_kernel_top * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
         self._hierarchy_kernel1 = self._hierarchy_kernel1 * self._recurrent_max_abs / tf.maximum(self._recurrent_max_abs_tensor, W_l2norm)
-    gate_inputs = math_ops.matmul(inputs, self._input_kernel)
+    if self._layer_idx == 0:
+        gate_inputs = math_ops.matmul(inputs, self._input_kernel)
+    else:
+        _input_kernel_last = [v for v in tf.global_variables() if v.name == "rnn/multi_rnn_cell/cell_"+str(self._layer_idx-1)+"/ind_rnn_cell/input_kernel_top:0"][0]
+        gate_inputs = math_ops.matmul(inputs, _input_kernel_last)
     is_training = True
     gate_inputs = batch_norm(gate_inputs, 'gate_inputs', is_training)
-    recurrent_update = math_ops.multiply(state, self._recurrent_kernel)
+    recurrent_update = math_ops.multiply(state[0], self._recurrent_kernel)
     #recurrent_update = batch_norm(recurrent_update, 'recurrent_update', is_training)
-    if self.topdown and last_state:
-    #    hierarchy_update = math_ops.multiply(last_state, self._hierarchy_kernel)
-    #    gate_inputs = math_ops.add(gate_inputs, hierarchy_update)
+    if self.topdown:
+        #hierarchy_update = math_ops.multiply(last_state, self._hierarchy_kernel)
+        #gate_inputs = math_ops.add(gate_inputs, hierarchy_update)
 
         #gate_inputs = math_ops.add(gate_inputs, last_state)
 
@@ -253,7 +264,7 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
 class MultiRNNCell(rnn_cell_impl._LayerRNNCell):
   """RNN cell composed sequentially of multiple simple cells."""
 
-  def __init__(self, cells, state_is_tuple=True):
+  def __init__(self, cells, batch_size, state_is_tuple=True):
     """Create a RNN cell composed sequentially of a number of RNNCells.
     Args:
       cells: list of RNNCells that will be composed in this order.
@@ -279,8 +290,11 @@ class MultiRNNCell(rnn_cell_impl._LayerRNNCell):
         raise ValueError("Some cells return tuples of states, but the flag "
                          "state_is_tuple is not set.  State sizes are: %s"
                          % str([c.state_size for c in self._cells]))
+    self.batch_size = batch_size
 
-    self.last_states = [None for _ in range(len(cells)+1)]
+    #self.last_states = [None for _ in range(len(cells)+1)]
+    #TODO
+    self.last_states = [tf.zeros([batch_size, self._cells[0].state_size], name="zeros_"+str(i)) for i in range(len(cells)+1)]
 
   @property
   def state_size(self):
@@ -319,7 +333,8 @@ class MultiRNNCell(rnn_cell_impl._LayerRNNCell):
           cur_state = array_ops.slice(state, [0, cur_state_pos],
                                       [-1, cell.state_size])
           cur_state_pos += cell.state_size
-        cur_inp, new_state = cell(cur_inp, cur_state, self.last_states[i+1])
+        print (self.last_states[i+1])
+        cur_inp, new_state = cell(cur_inp, [cur_state, self.last_states[i+1]])
         new_states.append(new_state)
         self.last_states[i] = new_state
 

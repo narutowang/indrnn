@@ -52,12 +52,16 @@ def main():
 
   # Build the graph
   #cell = tf.nn.rnn_cell.MultiRNNCell([
-  cell = MultiRNNCell(cells)
+  cell = MultiRNNCell(cells, BATCH_SIZE)
   # cell = tf.nn.rnn_cell.BasicLSTMCell(NUM_UNITS) #uncomment this for LSTM runs
 
   output, state = tf.nn.dynamic_rnn(cell, inputs_ph1, dtype=tf.float32)
 
-  #print ( tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='cell_0'))
+  #print ( tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='rnn/multi_rnn_cell/cell_0'))
+  #print ( tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='cell_1'))
+  #print (tf.global_variables())
+  #exit()
+
   #print ( tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='rnn/multi_rnn_cell/cell_1' ))
   #exit()
   #is_training = True
@@ -110,7 +114,7 @@ def main():
 
         test_acc = []
         for iteration in range(TEST_ITERS):
-            x, y = mnist.test.next_batch(256)
+            x, y = mnist.test.next_batch(BATCH_SIZE)
             loss, acc = sess.run([loss_op, accuracy], {inputs_ph: x[:,perm], targets_ph: y, in_training: False})
             test_acc.append(acc)
 
