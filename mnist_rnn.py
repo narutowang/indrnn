@@ -34,6 +34,8 @@ TEST_ITERS = int(mnist.test.num_examples / BATCH_SIZE)
 
 def main():
   # Placeholders for training data
+  print ("here")
+  sys.stdout.flush()
   inputs_ph = tf.placeholder(tf.float32, shape=(None, TIME_STEPS))
   targets_ph = tf.placeholder(tf.int64, shape=(None))
   inputs_ph1 = tf.expand_dims(inputs_ph, -1)
@@ -49,6 +51,8 @@ def main():
       cells.append(single_cell)
       #input_initializer=input_init,
       #recurrent_initializer=recurrent_init))
+  print ("here1")
+  sys.stdout.flush()
 
   # Build the graph
   #cell = tf.nn.rnn_cell.MultiRNNCell([
@@ -74,6 +78,8 @@ def main():
   prediction = tf.squeeze(tf.matmul(last, weight) + bias)
   loss_op = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=targets_ph)
   accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(prediction, 1), targets_ph), tf.float32))
+  print ("here2")
+  sys.stdout.flush()
 
   global_step = tf.get_variable("global_step", shape=[], trainable=False,
                                 initializer=tf.zeros_initializer)
@@ -86,6 +92,8 @@ def main():
   # Train the model
   np.random.seed(1234)
   perm = np.random.permutation(TIME_STEPS)
+  print ("here3")
+  sys.stdout.flush()
   gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.2)
   #fout = open('ind_semi_W_ckipnorm.txt', 'w')
   #fout = open('ind_input_init.txt', 'w')
@@ -98,6 +106,8 @@ def main():
   with tf.Session(config=tf.ConfigProto(gpu_options=gpu_options,log_device_placement=False)) as sess:
     sess.run(tf.global_variables_initializer())
     for epoch in range(NUM_EPOCHS):
+        print ("epoch:", epoch)
+        sys.stdout.flush()
         train_acc = []
         for iteration in range(ITERATIONS_PER_EPOCH):
             x, y = mnist.train.next_batch(BATCH_SIZE)

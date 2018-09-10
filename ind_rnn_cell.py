@@ -46,7 +46,8 @@ def batch_norm(inputs, name_scope, is_training, epsilon=1e-3, decay=0.99):
                 inputs, population_mean, population_var, offset, scale,
                 epsilon)
 
-class IndRNNCell(rnn_cell_impl._LayerRNNCell):
+#class IndRNNCell(rnn_cell_impl._LayerRNNCell):
+class IndRNNCell(rnn_cell_impl.RNNCell):
   """Independently RNN Cell. Adapted from `rnn_cell_impl.BasicRNNCell`.
 
   The implementation is based on:
@@ -261,7 +262,8 @@ class IndRNNCell(rnn_cell_impl._LayerRNNCell):
     return output, output
 
 
-class MultiRNNCell(rnn_cell_impl._LayerRNNCell):
+#class MultiRNNCell(rnn_cell_impl._LayerRNNCell):
+class MultiRNNCell(rnn_cell_impl.RNNCell):
   """RNN cell composed sequentially of multiple simple cells."""
 
   def __init__(self, cells, batch_size, state_is_tuple=True):
