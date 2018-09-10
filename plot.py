@@ -2,7 +2,7 @@ import matplotlib
 matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
-fin = open('result.txt', 'r')
+fin = open('res.txt', 'r')
 
 res = []
 for l in fin:
